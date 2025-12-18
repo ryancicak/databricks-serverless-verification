@@ -2,14 +2,19 @@
 
 This tool verifies that Databricks Serverless jobs can access a specific S3 bucket. It automates the setup of Unity Catalog (Storage Credential and External Location) and runs a test job to confirm read/write permissions.
 
+**New:** It now includes specific validation for **Serverless Network Connectivity Configurations (NCC)**, checking if strict egress policies are blocking access.
+
 ## Overview
 
-Databricks Serverless compute cannot access S3 directly using instance profiles or keys. It requires a Unity Catalog External Location to bridge the connection. This project provides a script to:
+Databricks Serverless compute cannot access S3 directly using instance profiles or keys. It requires a Unity Catalog External Location to bridge the connection. Additionally, if your workspace uses a Network Connectivity Configuration (NCC) with strict egress rules, you must explicitly allow the S3 bucket.
+
+This project provides a script to:
 
 1.  Create a test S3 bucket (using your local AWS credentials).
 2.  Update an IAM Role with the necessary S3 permissions.
 3.  Create the Unity Catalog Storage Credential and External Location.
 4.  Submit a Serverless Job that writes to and reads from the bucket.
+5.  **Validate** if the job failed due to a Serverless Network Policy (Strict Egress) block.
 
 ## Prerequisites
 
@@ -44,15 +49,22 @@ The script performs the following actions:
     *   Creates an `External Location` pointing to the new S3 bucket.
     *   Grants `READ FILES` and `WRITE FILES` permissions to your user.
 4.  **Verification**: Uploads a Python notebook and submits it as a Databricks Job using Serverless compute. The job writes a file to S3 and verifies it can read it back.
+5.  **Policy Analysis**: If the job fails, it analyzes the error message to determine if it was caused by a Serverless Network Policy blocking outbound access.
 
 ## Troubleshooting
 
 If the verification fails:
 
-*   **403 Forbidden**: This usually means the IAM Role does not have `s3:GetObject`, `s3:PutObject`, or `s3:ListBucket` permissions for the specific bucket. The script attempts to fix this automatically.
-*   **Serverless not available**: Ensure your workspace supports Serverless compute and it is enabled.
+*   **❌ FAIL: Strict Egress Policy is blocking access**:
+    *   **Reason**: Your workspace has a Network Connectivity Configuration (NCC) attached that restricts outbound traffic.
+    *   **Fix**: You must add the S3 bucket URL (e.g., `s3://my-test-bucket`) to the **Egress Rules** of your NCC in the Databricks Account Console.
+
+*   **403 Forbidden**:
+    *   This usually means the IAM Role does not have `s3:GetObject`, `s3:PutObject`, or `s3:ListBucket` permissions for the specific bucket. The script attempts to fix this automatically.
+
+*   **Serverless not available**:
+    *   Ensure your workspace supports Serverless compute and it is enabled.
 
 ## Cleanup
 
 At the end of the run, the script will offer to delete the test S3 bucket. The Unity Catalog objects (Credential and External Location) are left in place but can be manually deleted from the Databricks UI if desired.
-

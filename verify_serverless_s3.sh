@@ -203,8 +203,35 @@ try:
         credential_name=cred_name
     )
 except Exception as e:
-    if "already exists" in str(e): print("Location exists.")
-    else: raise e
+    if "already exists" in str(e): 
+        print("Location exists.")
+    elif "PERMISSION_DENIED" in str(e) or "User does not have CREATE EXTERNAL LOCATION" in str(e):
+        print(f"\n{'-'*60}")
+        print("STOP: PERMISSION ERROR")
+        print(f"You do not have permission to create External Locations on this Metastore.")
+        print(f"Please ask a Metastore Admin to run this SQL for you:")
+        print(f"   GRANT CREATE EXTERNAL LOCATION ON METASTORE TO `{principal}`;")
+        print(f"{'-'*60}\n")
+        
+        # Interactive Prompt to Retry
+        while True:
+            resp = input("Have you (or an admin) fixed the permission? Type 'retry' to try again, or 'skip' to skip creation (if it already exists): ").lower()
+            if resp == 'retry':
+                try:
+                    w.external_locations.create(
+                        name=loc_name,
+                        url=bucket_url,
+                        credential_name=cred_name
+                    )
+                    print("Successfully created External Location on retry!")
+                    break
+                except Exception as retry_err:
+                     print(f"Retry failed: {retry_err}")
+            elif resp == 'skip':
+                print("Skipping External Location creation...")
+                break
+    else: 
+        raise e
 
 # 3. Grant Permissions
 print("Granting Permissions...")
@@ -258,6 +285,29 @@ run = w.jobs.submit(
 
 print(f"Job Status: {run.state.result_state}")
 print(f"Run URL: {run.run_page_url}")
+
+# --- Network Policy Validation ---
+print("\n" + "="*50)
+print("   Serverless Network Policy Validation")
+print("="*50)
+
+if run.state.result_state.value == "SUCCESS":
+    print(f"✅ PASS: Serverless Network Policy allows access to s3://{bucket_name}")
+else:
+    # Get failure reason
+    msg = run.state.state_message or ""
+    if run.tasks:
+        for t in run.tasks:
+             if t.state.state_message:
+                 msg += f"\nTask {t.task_key}: {t.state.state_message}"
+
+    if "serverless network policy" in msg.lower():
+        print(f"❌ FAIL: Strict Egress Policy is blocking access.")
+        print(f"   Reason: Access to {bucket_name} is denied by the attached Network Connectivity Configuration (NCC).")
+        print(f"   Action: Add 's3://{bucket_name}' to the allowed egress rules in your NCC.")
+    else:
+        print(f"❌ FAIL: Job failed (possibly not Network Policy related).")
+        print(f"   Reason: {msg}")
 
 if run.state.result_state.value != "SUCCESS":
     exit(1)
